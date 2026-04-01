@@ -1,0 +1,91 @@
+#pragma once
+
+#include "../codec/codec.h"
+#include "../format/esc_format.h"
+#include "../io/compression_io.h"
+#include "../types/compression_types.h"
+
+#include <mutex>
+#include <memory>
+
+struct CompressionJobControl;
+
+class CompressionJobHandle {
+  public:
+	CompressionJobHandle() = default;
+
+	bool valid() const noexcept;
+	bool done() const noexcept;
+	bool cancel() const noexcept;
+	CompressionJobState state() const noexcept;
+	CompressionResult result() const noexcept;
+	uint32_t id() const noexcept;
+
+  private:
+	friend class ESPCompressor;
+	explicit CompressionJobHandle(std::shared_ptr<CompressionJobControl> control)
+	    : _control(std::move(control)) {
+	}
+
+	std::shared_ptr<CompressionJobControl> _control;
+};
+
+class ESPCompressor {
+  public:
+	ESPCompressor() = default;
+	~ESPCompressor();
+
+	CompressionError init(const ESPCompressorConfig &config = {}) noexcept;
+	void deinit() noexcept;
+	bool isInitialized() const noexcept;
+
+	CompressionResult compress(
+	    CompressionSource &source,
+	    CompressionSink &sink,
+	    ProgressCallback onProgress = nullptr,
+	    const CompressionJobOptions &options = {}
+	) noexcept;
+
+	CompressionResult decompress(
+	    CompressionSource &source,
+	    CompressionSink &sink,
+	    ProgressCallback onProgress = nullptr,
+	    const CompressionJobOptions &options = {}
+	) noexcept;
+
+	CompressionJobHandle compressAsync(
+	    std::shared_ptr<CompressionSource> source,
+	    std::shared_ptr<CompressionSink> sink,
+	    const CompressionCallbacks &callbacks = {},
+	    const CompressionJobOptions &options = {}
+	) noexcept;
+
+	CompressionJobHandle decompressAsync(
+	    std::shared_ptr<CompressionSource> source,
+	    std::shared_ptr<CompressionSink> sink,
+	    const CompressionCallbacks &callbacks = {},
+	    const CompressionJobOptions &options = {}
+	) noexcept;
+
+	bool cancel(const CompressionJobHandle &handle) noexcept;
+	bool isBusy() const noexcept;
+	CompressionResult lastResult() const noexcept;
+
+  private:
+	CompressionJobHandle submitAsync(
+	    CompressionOperation operation,
+	    std::shared_ptr<CompressionSource> source,
+	    std::shared_ptr<CompressionSink> sink,
+	    const CompressionCallbacks &callbacks,
+	    const CompressionJobOptions &options
+	) noexcept;
+
+	void finishAsyncJob(const std::shared_ptr<CompressionJobControl> &job) noexcept;
+
+	ESPCompressorConfig _config{};
+	bool _initialized = false;
+	mutable std::mutex _mutex;
+	std::shared_ptr<CompressionJobControl> _activeJob;
+	CompressionResult _lastResult{};
+	uint32_t _nextJobId = 1;
+};

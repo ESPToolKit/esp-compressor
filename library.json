@@ -1,0 +1,38 @@
+{
+  "name": "ESPCompressor",
+  "version": "1.0.0",
+  "description": "Async-first block compression for ESP32 buffers, files, and streams.",
+  "keywords": [
+    "esp32",
+    "arduino",
+    "compression",
+    "backup",
+    "stream",
+    "filesystem"
+  ],
+  "homepage": "https://github.com/ESPToolKit/esp-compressor",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ESPToolKit/esp-compressor.git"
+  },
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "zekageri"
+    }
+  ],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "dependencies": [
+    {
+      "name": "ESPBufferManager",
+      "version": "https://github.com/ESPToolKit/esp-buffer-manager.git"
+    }
+  ],
+  "headers": ["ESPCompressor.h"],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  }
+}
