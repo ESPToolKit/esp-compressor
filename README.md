@@ -84,19 +84,30 @@ compressor.compressAsync(
 - If compression is not smaller than the input block, ESPCompressor stores the block raw.
 
 ## ESPJsonDB Backup Flow
-ESPCompressor intentionally stays independent from `ESPJsonDB`, but it fits snapshot export/import cleanly:
+ESPCompressor intentionally stays independent from `ESPJsonDB`. The recommended integration is now the optional bridge that ships on the `ESPJsonDB` side:
 
 ```cpp
-JsonDocument snapshot = db.getSnapshot(SnapshotMode::InMemoryConsistent);
-std::string json;
-serializeJson(snapshot, json);
+#include <ESPJsonDBCompressor.h>
 
-BufferSource source(reinterpret_cast<const uint8_t *>(json.data()), json.size());
+ESPJsonDB db;
+ESPCompressor compressor;
+
 FileSink sink(LittleFS, "/backups/snapshot.esc");
-CompressionResult result = compressor.compress(source, sink);
+DbStatus status = db.writeCompressedSnapshot(
+    compressor,
+    sink,
+    SnapshotMode::InMemoryConsistent
+);
 ```
 
-To restore, decompress the `.esc` file, deserialize the JSON payload, then call `restoreFromSnapshot()`.
+To restore from a compressed backup:
+
+```cpp
+FileSource source(LittleFS, "/backups/snapshot.esc");
+DbStatus status = db.restoreCompressedSnapshot(compressor, source);
+```
+
+If the compressed payload is stored in `db.files()`, stage it before restore because `restoreCompressedSnapshot()` replaces the database contents and `dropAll()` clears `/_files`.
 
 ## Examples
 - `examples/basic_roundtrip` – buffer-to-buffer roundtrip with status output.

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Updated the `ESPJsonDB` integration guidance to use the optional `ESPJsonDBCompressor.h` bridge instead of the manual snapshot-to-string roundtrip.
+
 ## [1.0.0] - 2026-04-01
 
 ### Added
