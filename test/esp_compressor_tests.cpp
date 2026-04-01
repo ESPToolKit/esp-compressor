@@ -457,6 +457,37 @@ void testSyncBusyStateAcrossSyncAndAsyncCalls() {
 	expectTrue(!compressor.isBusy(), "compressor should clear busy state after sync work");
 }
 
+void testAsyncSetupFailureCompletionDispatchesOnce() {
+	ESPCompressor compressor;
+	expectEqual(compressor.init(), CompressionError::Ok, "init should succeed");
+
+	for (CompressionError error : {CompressionError::NoMemory, CompressionError::InternalError}) {
+		int completionCount = 0;
+		CompressionResult completionResult{};
+
+		CompressionCallbacks callbacks{};
+		callbacks.onComplete = [&](const CompressionResult &result) {
+			++completionCount;
+			completionResult = result;
+		};
+
+		const CompressionJobHandle handle = espCompressorTestSimulateAsyncSetupFailure(
+		    compressor,
+		    CompressionOperation::Compress,
+		    error,
+		    callbacks
+		);
+
+		expectEqual(handle.state(), CompressionJobState::Rejected, "setup failure should reject the async job");
+		expectEqual(handle.result().error, error, "rejected async job should report the setup failure");
+		expectEqual(completionCount, 1, "completion callback should run exactly once for setup failure");
+		expectEqual(completionResult.error, error, "completion callback should receive the setup failure");
+		expectEqual(completionResult.operation, CompressionOperation::Compress, "completion callback should preserve operation");
+		expectEqual(compressor.lastResult().error, error, "last result should match the setup failure");
+		expectTrue(!compressor.isBusy(), "compressor should not stay busy after setup failure");
+	}
+}
+
 void testAsyncProgressBusyAndCompletion() {
 	ESPCompressor compressor;
 	expectEqual(compressor.init(), CompressionError::Ok, "init should succeed");
@@ -531,6 +562,7 @@ int main() {
 		testBufferSinkCommitReleasesStaging();
 		testFileSinkPreservesDestinationOnRenameFailure();
 		testSyncBusyStateAcrossSyncAndAsyncCalls();
+		testAsyncSetupFailureCompletionDispatchesOnce();
 		testAsyncProgressBusyAndCompletion();
 		testAsyncCancellationAndDeinit();
 	} catch (const std::exception &ex) {

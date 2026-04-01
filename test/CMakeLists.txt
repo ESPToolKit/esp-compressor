@@ -15,6 +15,7 @@ target_include_directories(esp_compressor_core
 )
 
 target_compile_features(esp_compressor_core PUBLIC cxx_std_17)
+target_compile_definitions(esp_compressor_core PUBLIC ESPCOMPRESSOR_TESTING)
 
 add_executable(esp_compressor_tests
     esp_compressor_tests.cpp

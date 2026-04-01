@@ -7,6 +7,16 @@
 #include <memory>
 
 struct CompressionJobControl;
+class ESPCompressor;
+
+#ifdef ESPCOMPRESSOR_TESTING
+CompressionJobHandle espCompressorTestSimulateAsyncSetupFailure(
+    ESPCompressor &compressor,
+    CompressionOperation operation,
+    CompressionError error,
+    const CompressionCallbacks &callbacks = {}
+) noexcept;
+#endif
 
 class CompressionJobHandle {
   public:
@@ -70,12 +80,26 @@ class ESPCompressor {
 	CompressionResult lastResult() const noexcept;
 
   private:
+#ifdef ESPCOMPRESSOR_TESTING
+	friend CompressionJobHandle espCompressorTestSimulateAsyncSetupFailure(
+	    ESPCompressor &compressor,
+	    CompressionOperation operation,
+	    CompressionError error,
+	    const CompressionCallbacks &callbacks
+	) noexcept;
+#endif
+
 	CompressionJobHandle submitAsync(
 	    CompressionOperation operation,
 	    std::shared_ptr<CompressionSource> source,
 	    std::shared_ptr<CompressionSink> sink,
 	    const CompressionCallbacks &callbacks,
 	    const CompressionJobOptions &options
+	) noexcept;
+
+	CompressionJobHandle rejectAcceptedAsyncSetupJob(
+	    const std::shared_ptr<CompressionJobControl> &job,
+	    CompressionError error
 	) noexcept;
 
 	void finishAsyncJob(const std::shared_ptr<CompressionJobControl> &job) noexcept;

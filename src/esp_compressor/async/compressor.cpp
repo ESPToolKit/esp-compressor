@@ -770,13 +770,7 @@ CompressionJobHandle ESPCompressor::submitAsync(
 
 	auto *args = new (std::nothrow) AsyncTaskArgs{this, job};
 	if (!args) {
-		job->state.store(CompressionJobState::Rejected, std::memory_order_release);
-		job->result.error = CompressionError::NoMemory;
-		finishAsyncJob(job);
-		if (job->callbacks.onComplete) {
-			job->callbacks.onComplete(job->result);
-		}
-		return CompressionJobHandle(job);
+		return rejectAcceptedAsyncSetupJob(job, CompressionError::NoMemory);
 	}
 
 	const BaseType_t created = xTaskCreatePinnedToCore(
@@ -817,12 +811,7 @@ CompressionJobHandle ESPCompressor::submitAsync(
 	);
 	if (created != pdPASS) {
 		delete args;
-		job->state.store(CompressionJobState::Rejected, std::memory_order_release);
-		job->result.error = CompressionError::InternalError;
-		finishAsyncJob(job);
-		if (job->callbacks.onComplete) {
-			job->callbacks.onComplete(job->result);
-		}
+		return rejectAcceptedAsyncSetupJob(job, CompressionError::InternalError);
 	}
 #else
 	std::thread([this, job]() {
@@ -856,6 +845,19 @@ CompressionJobHandle ESPCompressor::submitAsync(
 	return CompressionJobHandle(job);
 }
 
+CompressionJobHandle ESPCompressor::rejectAcceptedAsyncSetupJob(
+    const std::shared_ptr<CompressionJobControl> &job,
+    CompressionError error
+) noexcept {
+	job->state.store(CompressionJobState::Rejected, std::memory_order_release);
+	{
+		std::lock_guard<std::mutex> guard(job->mutex);
+		job->result.error = error;
+	}
+	finishAsyncJob(job);
+	return CompressionJobHandle(job);
+}
+
 void ESPCompressor::finishAsyncJob(const std::shared_ptr<CompressionJobControl> &job) noexcept {
 	CompletionCallback callback;
 	CompressionResult result{};
@@ -878,6 +880,30 @@ void ESPCompressor::finishAsyncJob(const std::shared_ptr<CompressionJobControl> 
 		callback(result);
 	}
 }
+
+#ifdef ESPCOMPRESSOR_TESTING
+CompressionJobHandle espCompressorTestSimulateAsyncSetupFailure(
+    ESPCompressor &compressor,
+    CompressionOperation operation,
+    CompressionError error,
+    const CompressionCallbacks &callbacks
+) noexcept {
+	auto job = std::make_shared<CompressionJobControl>();
+	job->id = 0;
+	job->operation = operation;
+	job->callbacks = callbacks;
+	job->result.operation = operation;
+
+	{
+		std::lock_guard<std::mutex> guard(compressor._mutex);
+		job->id = compressor._nextJobId++;
+		compressor._busy = true;
+		compressor._activeJob = job;
+	}
+
+	return compressor.rejectAcceptedAsyncSetupJob(job, error);
+}
+#endif
 
 bool ESPCompressor::cancel(const CompressionJobHandle &handle) noexcept {
 	return handle.cancel();
