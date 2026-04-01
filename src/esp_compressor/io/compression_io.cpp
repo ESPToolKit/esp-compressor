@@ -145,9 +145,11 @@ CompressionError DynamicBufferSink::commit() noexcept {
 	}
 	if (_staging.size() == 0) {
 		_out.clear();
+		_staging.release();
 		return CompressionError::Ok;
 	}
 	_out.assign(_staging.data(), _staging.data() + _staging.size());
+	_staging.release();
 	return CompressionError::Ok;
 }
 
@@ -193,6 +195,7 @@ CompressionError FixedBufferSink::commit() noexcept {
 	if (_staging.size() != 0) {
 		std::memcpy(_buffer, _staging.data(), _staging.size());
 	}
+	_staging.release();
 	return CompressionError::Ok;
 }
 
@@ -255,6 +258,7 @@ bool PrintSink::isTransactional() const noexcept {
 FileSink::FileSink(fs::FS &fs, const char *path, bool truncate)
     : _fs(&fs), _path(path ? path : ""), _truncate(truncate) {
 	_tempPath = _path + ".tmp";
+	_backupPath = _path + ".bak";
 }
 
 CompressionError FileSink::open() noexcept {
@@ -268,6 +272,7 @@ CompressionError FileSink::open() noexcept {
 		return CompressionError::OpenFailed;
 	}
 	cleanupTemp();
+	cleanupBackup();
 	_file = _fs->open(_tempPath.c_str(), "w");
 	if (!_file) {
 		return CompressionError::OpenFailed;
@@ -297,13 +302,21 @@ CompressionError FileSink::commit() noexcept {
 		return CompressionError::WriteFailed;
 	}
 	_file.close();
-	if (_fs->exists(_path.c_str())) {
-		_fs->remove(_path.c_str());
+	const bool hadDestination = _fs->exists(_path.c_str());
+	if (hadDestination) {
+		cleanupBackup();
+		if (!_fs->rename(_path.c_str(), _backupPath.c_str())) {
+			return CompressionError::WriteFailed;
+		}
 	}
 	if (!_fs->rename(_tempPath.c_str(), _path.c_str())) {
+		if (hadDestination) {
+			_fs->rename(_backupPath.c_str(), _path.c_str());
+		}
 		cleanupTemp();
 		return CompressionError::WriteFailed;
 	}
+	cleanupBackup();
 	return CompressionError::Ok;
 }
 
@@ -312,6 +325,7 @@ void FileSink::abort() noexcept {
 		_file.close();
 	}
 	cleanupTemp();
+	cleanupBackup();
 }
 
 void FileSink::close() noexcept {
@@ -332,5 +346,11 @@ bool FileSink::isTransactional() const noexcept {
 void FileSink::cleanupTemp() noexcept {
 	if (_fs && !_tempPath.empty() && _fs->exists(_tempPath.c_str())) {
 		_fs->remove(_tempPath.c_str());
+	}
+}
+
+void FileSink::cleanupBackup() noexcept {
+	if (_fs && !_backupPath.empty() && _fs->exists(_backupPath.c_str())) {
+		_fs->remove(_backupPath.c_str());
 	}
 }

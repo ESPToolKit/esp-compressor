@@ -1,5 +1,7 @@
 #include "compressor.h"
 
+#include "../codec/codec.h"
+#include "../format/esc_format.h"
 #include "../util/memory_buffer.h"
 
 #include <atomic>
@@ -52,6 +54,34 @@ CompressionResult makeResult(CompressionOperation operation, CompressionError er
 	return result;
 }
 
+class ScopedSyncRunSlot {
+  public:
+	ScopedSyncRunSlot(bool &busy, std::mutex &mutex) : _busy(&busy), _mutex(&mutex) {
+	}
+
+	ScopedSyncRunSlot(const ScopedSyncRunSlot &) = delete;
+	ScopedSyncRunSlot &operator=(const ScopedSyncRunSlot &) = delete;
+
+	~ScopedSyncRunSlot() {
+		release();
+	}
+
+	void release() noexcept {
+		if (!_busy || !_mutex) {
+			return;
+		}
+
+		std::lock_guard<std::mutex> guard(*_mutex);
+		*_busy = false;
+		_busy = nullptr;
+		_mutex = nullptr;
+	}
+
+  private:
+	bool *_busy = nullptr;
+	std::mutex *_mutex = nullptr;
+};
+
 bool isCancelled(const std::atomic<bool> *flag) {
 	return flag && flag->load(std::memory_order_acquire);
 }
@@ -69,6 +99,24 @@ bool shouldAbortForCancel(const RunContext &ctx, CompressionResult &result) {
 		return false;
 	}
 	result.error = CompressionError::Cancelled;
+	return true;
+}
+
+bool validateEscBlockBounds(const EscHeader &header, const EscBlockHeader &blockHeader) {
+	if (blockHeader.originalSize == 0 &&
+	    (blockHeader.flags & kEscBlockFlagFinal) == 0) {
+		return false;
+	}
+	if (blockHeader.originalSize > header.blockSize) {
+		return false;
+	}
+	if (blockHeader.storedSize > blockHeader.originalSize) {
+		return false;
+	}
+	if ((blockHeader.flags & kEscBlockFlagRaw) != 0 &&
+	    blockHeader.storedSize != blockHeader.originalSize) {
+		return false;
+	}
 	return true;
 }
 
@@ -353,6 +401,10 @@ CompressionResult runDecompress(const RunContext &ctx) {
 			return result;
 		}
 		sawFinalBlock = (blockHeader.flags & kEscBlockFlagFinal) != 0;
+		if (!validateEscBlockBounds(header, blockHeader)) {
+			result.error = CompressionError::CorruptData;
+			return result;
+		}
 
 		if (!storedBlock.resize(blockHeader.storedSize)) {
 			result.error = CompressionError::NoMemory;
@@ -537,7 +589,7 @@ CompressionError ESPCompressor::init(const ESPCompressorConfig &config) noexcept
 	}
 
 	std::lock_guard<std::mutex> guard(_mutex);
-	if (_activeJob) {
+	if (_busy) {
 		return CompressionError::Busy;
 	}
 	_config = config;
@@ -565,8 +617,20 @@ void ESPCompressor::deinit() noexcept {
 		}
 	}
 
-	std::lock_guard<std::mutex> guard(_mutex);
-	_activeJob.reset();
+	while (true) {
+		bool busy = false;
+		{
+			std::lock_guard<std::mutex> guard(_mutex);
+			busy = _busy;
+			if (!busy) {
+				_activeJob.reset();
+			}
+		}
+		if (!busy) {
+			break;
+		}
+		sleepBriefly();
+	}
 }
 
 bool ESPCompressor::isInitialized() const noexcept {
@@ -586,17 +650,20 @@ CompressionResult ESPCompressor::compress(
 		if (!_initialized) {
 			return makeResult(CompressionOperation::Compress, CompressionError::NotInitialized);
 		}
-		if (_activeJob) {
+		if (_busy) {
 			return makeResult(CompressionOperation::Compress, CompressionError::Busy);
 		}
+		_busy = true;
 		ctx.config = &_config;
 	}
+	ScopedSyncRunSlot runSlot(_busy, _mutex);
 	ctx.operation = CompressionOperation::Compress;
 	ctx.source = &source;
 	ctx.sink = &sink;
 	ctx.onProgress = std::move(onProgress);
 	ctx.options = options;
 	CompressionResult result = runSyncJob(ctx);
+	runSlot.release();
 	std::lock_guard<std::mutex> guard(_mutex);
 	_lastResult = result;
 	return result;
@@ -614,17 +681,20 @@ CompressionResult ESPCompressor::decompress(
 		if (!_initialized) {
 			return makeResult(CompressionOperation::Decompress, CompressionError::NotInitialized);
 		}
-		if (_activeJob) {
+		if (_busy) {
 			return makeResult(CompressionOperation::Decompress, CompressionError::Busy);
 		}
+		_busy = true;
 		ctx.config = &_config;
 	}
+	ScopedSyncRunSlot runSlot(_busy, _mutex);
 	ctx.operation = CompressionOperation::Decompress;
 	ctx.source = &source;
 	ctx.sink = &sink;
 	ctx.onProgress = std::move(onProgress);
 	ctx.options = options;
 	CompressionResult result = runSyncJob(ctx);
+	runSlot.release();
 	std::lock_guard<std::mutex> guard(_mutex);
 	_lastResult = result;
 	return result;
@@ -672,11 +742,12 @@ CompressionJobHandle ESPCompressor::submitAsync(
 		} else if (!job->source || !job->sink) {
 			job->state.store(CompressionJobState::Rejected, std::memory_order_release);
 			job->result.error = CompressionError::InvalidArgument;
-		} else if (_activeJob) {
+		} else if (_busy) {
 			job->state.store(CompressionJobState::Rejected, std::memory_order_release);
 			job->result.error = CompressionError::Busy;
 		} else {
 			job->state.store(CompressionJobState::Running, std::memory_order_release);
+			_busy = true;
 			_activeJob = job;
 		}
 		if (job->state.load(std::memory_order_acquire) == CompressionJobState::Rejected) {
@@ -800,6 +871,7 @@ void ESPCompressor::finishAsyncJob(const std::shared_ptr<CompressionJobControl> 
 		if (_activeJob == job) {
 			_activeJob.reset();
 		}
+		_busy = false;
 	}
 
 	if (callback) {
@@ -813,7 +885,7 @@ bool ESPCompressor::cancel(const CompressionJobHandle &handle) noexcept {
 
 bool ESPCompressor::isBusy() const noexcept {
 	std::lock_guard<std::mutex> guard(_mutex);
-	return static_cast<bool>(_activeJob);
+	return _busy;
 }
 
 CompressionResult ESPCompressor::lastResult() const noexcept {

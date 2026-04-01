@@ -1,7 +1,5 @@
 #pragma once
 
-#include "../codec/codec.h"
-#include "../format/esc_format.h"
 #include "../io/compression_io.h"
 #include "../types/compression_types.h"
 
@@ -84,6 +82,7 @@ class ESPCompressor {
 
 	ESPCompressorConfig _config{};
 	bool _initialized = false;
+	bool _busy = false;
 	mutable std::mutex _mutex;
 	std::shared_ptr<CompressionJobControl> _activeJob;
 	CompressionResult _lastResult{};

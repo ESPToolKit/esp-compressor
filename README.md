@@ -12,7 +12,7 @@ ESPCompressor is an async-first compression library for ESP32 projects that need
 - Public synchronous APIs plus async background execution with progress and completion callbacks.
 - Stable `.esc` container with versioned header, block records, CRC32 checks, and raw-block fallback.
 - Transactional sinks for buffer and file outputs so failed jobs do not silently publish partial data.
-- Cooperative cancellation and clean busy-state rejection.
+- Cooperative cancellation and consistent same-instance busy-state rejection across sync and async calls.
 - PSRAM-aware staging buffers through `ESPBufferManager`.
 - Shaped for `ESPJsonDB` snapshot backup/restore flows without adding a direct dependency.
 
@@ -75,6 +75,8 @@ compressor.compressAsync(
 - `bool cancel(const CompressionJobHandle&)`
 - `CompressionResult lastResult() const`
 
+`#include <ESPCompressor.h>` exposes the stable high-level API. Advanced `.esc` format constants and block/header types remain available through `#include <ESPCompressorFormat.h>` when you need container inspection helpers.
+
 ## Container Format
 - Magic: `ESC1`
 - Version: `1`
@@ -115,13 +117,14 @@ If the compressed payload is stored in `db.files()`, stage it before restore bec
 - `examples/stream_roundtrip` – serialize JSON into a stream source and emit compressed bytes to a `Print` sink.
 
 ## Notes
-- Callbacks execute on the async worker context and should return quickly.
+- Callbacks execute on the async worker task/thread context and should return quickly without blocking; any shared state they touch must be safe for that execution context.
 - Non-transactional sinks such as `PrintSink` are rejected by default unless `CompressionJobOptions::allowPartialOutput` is enabled.
-- `FileSink` writes to `path.tmp` first and renames only after a successful commit.
+- `FileSink` writes to `path.tmp` first and uses a best-effort replace-with-rollback flow on commit. This preserves the old destination if the final rename fails, but it is not guaranteed to be an atomic replace on every Arduino filesystem backend.
 - Unknown-size sources are supported; in that case `CompressionProgress::hasKnownTotalInput` is `false`.
+- `StreamSource` treats a zero-byte `readBytes()` result as end-of-input, so it is intended for finite/file-like streams. Timeout-driven or incremental transports should add framing or buffering above the source adapter.
 
 ## Tests
-The host CMake test suite under `test/` covers block roundtrips, corruption handling, raw fallback, transactional sink behavior, and async lifecycle checks. The Arduino examples are built in CI through PlatformIO and Arduino CLI.
+The host CMake test suite under `test/` covers block roundtrips, corruption handling, malformed block bounds, raw fallback, transactional sink behavior, file rollback on rename failure, and sync/async lifecycle checks. The Arduino examples are built in CI through PlatformIO and Arduino CLI.
 
 ## License
 ESPCompressor is released under the [MIT License](LICENSE.md).

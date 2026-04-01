@@ -104,9 +104,18 @@ class FS {
 	}
 
 	bool rename(const char *from, const char *to) {
+		++_renameCallCount;
+		if (_failRenameOnCall != 0 && _renameCallCount == _failRenameOnCall) {
+			return false;
+		}
 		std::error_code ec;
 		std::filesystem::rename(resolve(from), resolve(to), ec);
 		return !ec;
+	}
+
+	void failRenameOnCall(size_t callIndex) {
+		_failRenameOnCall = callIndex;
+		_renameCallCount = 0;
 	}
 
 	std::filesystem::path root() const {
@@ -123,6 +132,8 @@ class FS {
 	}
 
 	std::filesystem::path _root;
+	size_t _failRenameOnCall = 0;
+	size_t _renameCallCount = 0;
 };
 
 } // namespace fs

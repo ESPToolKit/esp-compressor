@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Updated the `ESPJsonDB` integration guidance to use the optional `ESPJsonDBCompressor.h` bridge instead of the manual snapshot-to-string roundtrip.
+- Unified same-instance busy-state handling across synchronous and asynchronous jobs.
+- Tightened `.esc` decompression validation to reject oversized or malformed block headers before allocation.
+- Released transactional buffer-sink staging memory immediately after successful commits.
+- Narrowed the default public header surface and moved `.esc` format internals behind the explicit `ESPCompressorFormat.h` opt-in header.
+- Changed `FileSink` commit to use best-effort replacement with rollback so rename failures preserve the previous destination.
+- Documented async callback execution context and `StreamSource` zero-byte-read EOF behavior more explicitly.
 
 ## [1.0.0] - 2026-04-01
 

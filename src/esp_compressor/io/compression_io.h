@@ -163,10 +163,12 @@ class FileSink : public CompressionSink {
 
   private:
 	void cleanupTemp() noexcept;
+	void cleanupBackup() noexcept;
 
 	fs::FS *_fs = nullptr;
 	std::string _path;
 	std::string _tempPath;
+	std::string _backupPath;
 	bool _truncate = true;
 	File _file;
 	bool _open = false;
