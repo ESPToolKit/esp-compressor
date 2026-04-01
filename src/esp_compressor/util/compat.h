@@ -55,7 +55,10 @@ class Stream : public Print {
 };
 #endif
 
-#if __has_include(<FS.h>)
+#if defined(ARDUINO)
+#include <FS.h>
+#define ESPCOMPRESSOR_HAS_FS 1
+#elif __has_include(<FS.h>)
 #include <FS.h>
 #define ESPCOMPRESSOR_HAS_FS 1
 #else
