@@ -13,6 +13,9 @@ All notable changes to this project will be documented in this file.
 - Changed `FileSink` commit to use best-effort replacement with rollback so rename failures preserve the previous destination.
 - Documented async callback execution context and `StreamSource` zero-byte-read EOF behavior more explicitly.
 
+### Fixed
+- CI now pins PIOArduino Core to `v6.1.19` and installs the ESP32 platform via `pio pkg install`, restoring PlatformIO compatibility with the current `platform-espressif32` package.
+
 ## [1.0.0] - 2026-04-01
 
 ### Added
